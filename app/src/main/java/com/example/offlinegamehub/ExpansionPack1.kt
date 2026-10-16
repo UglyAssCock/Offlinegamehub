@@ -1,6 +1,7 @@
 package com.example.offlinegamehub
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,425 +9,299 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.random.Random
 
+// =========================================================
+// 1. DARTS 301 (20-SLICE RADIAL BOARD + X/Y TIMING BARS)
+// =========================================================
 @Composable
-fun ModeSelectorBar(
-    vsBot: Boolean,
-    accentColor: Color,
-    onModeChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Button(
-            onClick = { onModeChange(true) },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (vsBot) accentColor else Color(0xFF1E293B)
-            ),
-            modifier = Modifier.weight(1f)
-        ) {
-            Text("Vs Smart Bot", color = if (vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-        }
-        Button(
-            onClick = { onModeChange(false) },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (!vsBot) accentColor else Color(0xFF1E293B)
-            ),
-            modifier = Modifier.weight(1f)
-        ) {
-            Text("Vs Friend (2P)", color = if (!vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun TicTacToeScreen(
+fun DartsGameScreen(
     highScore: Int,
     onSaveScore: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
     var vsBot by remember { mutableStateOf(true) }
-    var board by remember { mutableStateOf(List(9) { "" }) }
-    var isXTurn by remember { mutableStateOf(true) }
-    var winner by remember { mutableStateOf<String?>(null) }
-    var p1Wins by remember { mutableIntStateOf(0) }
-    var p2Wins by remember { mutableIntStateOf(0) }
+    var youScore by remember { mutableIntStateOf(301) }
+    var botScore by remember { mutableIntStateOf(301) }
+    var isPlayerTurn by remember { mutableStateOf(true) }
 
-    val winLines = listOf(
-        listOf(0, 1, 2), listOf(3, 4, 5), listOf(6, 7, 8),
-        listOf(0, 3, 6), listOf(1, 4, 7), listOf(2, 5, 8),
-        listOf(0, 4, 8), listOf(2, 4, 6)
-    )
+    // 0 = aiming vertical (Y), 1 = aiming horizontal (X), 2 = dart landed
+    var aimPhase by remember { mutableIntStateOf(0) }
+    var aimY by remember { mutableFloatStateOf(0.5f) }
+    var aimX by remember { mutableFloatStateOf(0.5f) }
+    var lastHitOffset by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    var statusText by remember { mutableStateOf("Tap screen to lock Vertical aim!") }
 
-    fun checkWinner(b: List<String>): String? {
-        for (line in winLines) {
-            val a = b[line[0]]
-            if (a.isNotEmpty() && a == b[line[1]] && a == b[line[2]]) return a
+    LaunchedEffect(aimPhase, isPlayerTurn) {
+        var dir = 1f
+        while (isPlayerTurn && (aimPhase == 0 || aimPhase == 1)) {
+            delay(16L)
+            if (aimPhase == 0) {
+                aimY += 0.032f * dir
+                if (aimY >= 1f) { aimY = 1f; dir = -1f }
+                if (aimY <= 0f) { aimY = 0f; dir = 1f }
+            } else {
+                aimX += 0.035f * dir
+                if (aimX >= 1f) { aimX = 1f; dir = -1f }
+                if (aimX <= 0f) { aimX = 0f; dir = 1f }
+            }
         }
-        return if (b.none { it.isEmpty() }) "DRAW" else null
     }
 
-    fun resetBoard() {
-        board = List(9) { "" }
-        isXTurn = true
-        winner = null
+    LaunchedEffect(isPlayerTurn, vsBot, youScore, botScore) {
+        if (vsBot && !isPlayerTurn && youScore > 0 && botScore > 0) {
+            statusText = "Bot is aiming..."
+            delay(850L)
+            val bx = Random.nextFloat() * 0.4f + 0.3f
+            val by = Random.nextFloat() * 0.4f + 0.3f
+            lastHitOffset = Pair(bx, by)
+            val pts = listOf(20, 25, 40, 50, 60).random()
+            if (botScore - pts >= 0) botScore -= pts
+            statusText = "Bot scored $pts!"
+            delay(650L)
+            if (botScore > 0) {
+                isPlayerTurn = true
+                aimPhase = 0
+                statusText = "Your Turn! Tap to lock Vertical aim."
+            }
+        }
     }
 
-    LaunchedEffect(isXTurn, vsBot, winner) {
-        if (vsBot && !isXTurn && winner == null) {
-            delay(450L)
-            val emptyIndices = board.indices.filter { board[it].isEmpty() }
-            if (emptyIndices.isNotEmpty()) {
-                var chosen: Int? = null
-                for (idx in emptyIndices) {
-                    val test = board.toMutableList().apply { this[idx] = "O" }
-                    if (checkWinner(test) == "O") { chosen = idx; break }
-                }
-                if (chosen == null) {
-                    for (idx in emptyIndices) {
-                        val test = board.toMutableList().apply { this[idx] = "X" }
-                        if (checkWinner(test) == "X") { chosen = idx; break }
+    fun resetDarts() {
+        youScore = 301
+        botScore = 301
+        isPlayerTurn = true
+        aimPhase = 0
+        lastHitOffset = null
+        statusText = "Tap screen to lock Vertical aim!"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF5FA8D3))
+            .clickable(enabled = isPlayerTurn && youScore > 0 && botScore > 0) {
+                if (aimPhase == 0) {
+                    aimPhase = 1
+                    statusText = "Now tap to lock Horizontal aim & THROW!"
+                } else if (aimPhase == 1) {
+                    aimPhase = 2
+                    lastHitOffset = Pair(aimX, aimY)
+                    val dist = hypot((aimX - 0.5f).toDouble(), (aimY - 0.5f).toDouble()).toFloat()
+                    val pts = when {
+                        dist < 0.07f -> 50
+                        dist < 0.16f -> 60
+                        dist < 0.28f -> 40
+                        dist < 0.42f -> 20
+                        else -> 10
                     }
-                }
-                if (chosen == null && 4 in emptyIndices) chosen = 4
-                val move = chosen ?: emptyIndices.random()
-
-                val updated = board.toMutableList().apply { this[move] = "O" }
-                board = updated
-                val w = checkWinner(updated)
-                if (w != null) {
-                    winner = w
-                    if (w == "O") p2Wins++
-                } else {
-                    isXTurn = true
+                    if (youScore - pts >= 0) youScore -= pts
+                    statusText = "Bullseye zone! You scored $pts pts!"
+                    if (youScore == 0) {
+                        onSaveScore(500)
+                        statusText = "YOU WIN 301!"
+                    } else {
+                        isPlayerTurn = false
+                    }
+                } else if (!vsBot) {
+                    isPlayerTurn = true
+                    aimPhase = 0
                 }
             }
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Tic Tac Toe", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { resetBoard() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFFEF4444)) }
-        }
-
-        ModeSelectorBar(vsBot = vsBot, accentColor = Color(0xFFEF4444)) {
-            vsBot = it
-            p1Wins = 0
-            p2Wins = 0
-            resetBoard()
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Text("Player X: $p1Wins", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
-                Text(if (vsBot) "Bot O: $p2Wins" else "Friend O: $p2Wins", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
-                Text("Best: $highScore", color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
+        // Striped Wallpaper + Wooden Floor Canvas
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stripeW = size.width / 11f
+            for (i in 0..10) {
+                if (i % 2 == 0) {
+                    drawRect(
+                        color = Color(0xFF539DC8),
+                        topLeft = Offset(i * stripeW, 0f),
+                        size = Size(stripeW, size.height * 0.82f)
+                    )
+                }
             }
+            drawRect(
+                color = Color(0xFF9C5233),
+                topLeft = Offset(0f, size.height * 0.82f),
+                size = Size(size.width, size.height * 0.18f)
+            )
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = when (winner) {
-                "X" -> "Player X Wins!"
-                "O" -> if (vsBot) "Bot Wins!" else "Friend O Wins!"
-                "DRAW" -> "It's a Draw!"
-                else -> if (isXTurn) "Turn: Player X" else if (vsBot) "Bot is thinking..." else "Turn: Friend O"
-            },
-            fontSize = 20.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = Color.White
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         Column(
-            modifier = Modifier.size(300.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            for (r in 0..2) {
-                Row(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    for (c in 0..2) {
-                        val idx = r * 3 + c
-                        val cell = board[idx]
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFF1E293B))
-                                .clickable(enabled = cell.isEmpty() && winner == null && (!vsBot || isXTurn)) {
-                                    val sym = if (isXTurn) "X" else "O"
-                                    val updated = board.toMutableList().apply { this[idx] = sym }
-                                    board = updated
-                                    val w = checkWinner(updated)
-                                    if (w != null) {
-                                        winner = w
-                                        if (w == "X") {
-                                            p1Wins++
-                                            onSaveScore(p1Wins * 150)
-                                        } else if (w == "O") {
-                                            p2Wins++
-                                        }
-                                    } else {
-                                        isXTurn = !isXTurn
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = cell,
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (cell == "X") Color(0xFF38BDF8) else Color(0xFFEF4444)
-                            )
-                        }
-                    }
-                }
+            ArcadeVsHeader(
+                youScore = youScore,
+                opponentScore = botScore,
+                vsBot = vsBot,
+                onToggleMode = { vsBot = !vsBot; resetDarts() },
+                onBack = onBack,
+                onRestart = { resetDarts() }
+            )
+
+            // Cyan Dart Icon at Top
+            Canvas(modifier = Modifier.size(68.dp)) {
+                drawCircle(color = Color(0xFF00D2FF), radius = size.minDimension * 0.35f)
+                drawCircle(color = Color.Black, radius = size.minDimension * 0.35f, style = Stroke(5f))
+                drawCircle(color = Color.White, radius = size.minDimension * 0.12f)
             }
-        }
 
-        if (winner != null) {
-            Spacer(modifier = Modifier.height(20.dp))
-            Button(
-                onClick = { resetBoard() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-            ) {
-                Text("Next Round", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
+            Spacer(modifier = Modifier.height(8.dp))
 
-@Composable
-fun DotsAndBoxesScreen(
-    highScore: Int,
-    onSaveScore: (Int) -> Unit,
-    onBack: () -> Unit
-) {
-    BackHandler { onBack() }
-    val gridSize = 3
-    var vsBot by remember { mutableStateOf(true) }
-    var hLines by remember { mutableStateOf(BooleanArray(12)) }
-    var vLines by remember { mutableStateOf(BooleanArray(12)) }
-    var boxOwners by remember { mutableStateOf(IntArray(9)) }
-    var currentPlayer by remember { mutableIntStateOf(1) }
-
-    val p1Score = boxOwners.count { it == 1 }
-    val p2Score = boxOwners.count { it == 2 }
-    val isGameOver = boxOwners.all { it != 0 }
-
-    fun resetGame() {
-        hLines = BooleanArray(12)
-        vLines = BooleanArray(12)
-        boxOwners = IntArray(9)
-        currentPlayer = 1
-    }
-
-    fun applyMove(isHorizontal: Boolean, index: Int, player: Int) {
-        val newH = hLines.clone()
-        val newV = vLines.clone()
-        if (isHorizontal) newH[index] = true else newV[index] = true
-
-        val newOwners = boxOwners.clone()
-        var scoredBox = false
-        for (r in 0 until gridSize) {
-            for (c in 0 until gridSize) {
-                val boxIdx = r * gridSize + c
-                if (newOwners[boxIdx] == 0) {
-                    val top = newH[r * 3 + c]
-                    val bottom = newH[(r + 1) * 3 + c]
-                    val left = newV[r * 4 + c]
-                    val right = newV[r * 4 + (c + 1)]
-                    if (top && bottom && left && right) {
-                        newOwners[boxIdx] = player
-                        scoredBox = true
-                    }
-                }
-            }
-        }
-        hLines = newH
-        vLines = newV
-        boxOwners = newOwners
-
-        if (newOwners.all { it != 0 }) {
-            val p1Total = newOwners.count { it == 1 }
-            if (p1Total > newOwners.count { it == 2 }) {
-                onSaveScore(p1Total * 120)
-            }
-        } else if (!scoredBox) {
-            currentPlayer = if (player == 1) 2 else 1
-        }
-    }
-
-    LaunchedEffect(currentPlayer, vsBot, hLines, vLines, isGameOver) {
-        if (vsBot && currentPlayer == 2 && !isGameOver) {
-            delay(450L)
-            val availableH = hLines.indices.filter { !hLines[it] }.map { true to it }
-            val availableV = vLines.indices.filter { !vLines[it] }.map { false to it }
-            val allMoves = availableH + availableV
-            if (allMoves.isNotEmpty()) {
-                val chosen = allMoves.random()
-                applyMove(chosen.first, chosen.second, 2)
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Dots & Boxes", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { resetGame() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFF06B6D4)) }
-        }
-
-        ModeSelectorBar(vsBot = vsBot, accentColor = Color(0xFF06B6D4)) {
-            vsBot = it
-            resetGame()
-        }
-
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+            // Middle Row: Left Vertical Aim Slider + 20-Slice Radial Dartboard
             Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Text("P1 (Blue): $p1Score", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
-                Text(if (vsBot) "Bot (Amber): $p2Score" else "P2 (Amber): $p2Score", color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
-            }
-        }
+                // Left Vertical Aim Bar
+                Box(
+                    modifier = Modifier
+                        .width(18.dp)
+                        .height(230.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xFF3E3A3F))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .align(Alignment.TopCenter)
+                            .offset(y = (aimY * 220f).dp)
+                            .background(Color.White)
+                    )
+                }
 
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = if (isGameOver) {
-                if (p1Score > p2Score) "Player 1 Wins!" else if (p2Score > p1Score) "Player 2 / Bot Wins!" else "Draw!"
-            } else {
-                if (currentPlayer == 1) "Your Turn (Tap any gray line)" else if (vsBot) "Bot is drawing a line..." else "Friend's Turn (Tap a line)"
-            },
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.width(20.dp))
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            for (r in 0..3) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    for (c in 0..3) {
-                        Box(
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        )
-                        if (c < 3) {
-                            val hIdx = r * 3 + c
-                            val taken = hLines[hIdx]
-                            Box(
-                                modifier = Modifier
-                                    .width(68.dp)
-                                    .height(14.dp)
-                                    .background(if (taken) Color(0xFF06B6D4) else Color(0xFF334155))
-                                    .clickable(enabled = !taken && (!vsBot || currentPlayer == 1)) {
-                                        applyMove(true, hIdx, currentPlayer)
-                                    }
+                // 20-Slice Radial Vector Dartboard
+                Box(
+                    modifier = Modifier.size(275.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val r = size.minDimension / 2f
+                        val center = Offset(size.width / 2f, size.height / 2f)
+
+                        // Outer Black Number Ring
+                        drawCircle(color = Color(0xFF111315), radius = r, center = center)
+
+                        val sliceAngle = 360f / 20f
+                        for (i in 0 until 20) {
+                            val startAngle = -99f + i * sliceAngle
+                            val isEven = i % 2 == 0
+                            val mainColor = if (isEven) Color(0xFF111315) else Color(0xFFFFF8E7)
+                            val ringColor = if (isEven) Color(0xFFE53935) else Color(0xFF2E7D32)
+
+                            // Double Ring (Outer Red/Green)
+                            drawArc(
+                                color = ringColor,
+                                startAngle = startAngle,
+                                sweepAngle = sliceAngle,
+                                useCenter = true,
+                                topLeft = Offset(center.x - r * 0.78f, center.y - r * 0.78f),
+                                size = Size(r * 1.56f, r * 1.56f)
                             )
+                            // Outer Single Wedge
+                            drawArc(
+                                color = mainColor,
+                                startAngle = startAngle,
+                                sweepAngle = sliceAngle,
+                                useCenter = true,
+                                topLeft = Offset(center.x - r * 0.70f, center.y - r * 0.70f),
+                                size = Size(r * 1.40f, r * 1.40f)
+                            )
+                            // Triple Ring (Inner Red/Green)
+                            drawArc(
+                                color = ringColor,
+                                startAngle = startAngle,
+                                sweepAngle = sliceAngle,
+                                useCenter = true,
+                                topLeft = Offset(center.x - r * 0.48f, center.y - r * 0.48f),
+                                size = Size(r * 0.96f, r * 0.96f)
+                            )
+                            // Inner Single Wedge
+                            drawArc(
+                                color = mainColor,
+                                startAngle = startAngle,
+                                sweepAngle = sliceAngle,
+                                useCenter = true,
+                                topLeft = Offset(center.x - r * 0.40f, center.y - r * 0.40f),
+                                size = Size(r * 0.80f, r * 0.80f)
+                            )
+                        }
+
+                        // Bullseye Rings
+                        drawCircle(color = Color.White, radius = r * 0.14f, center = center)
+                        drawCircle(color = Color(0xFFE53935), radius = r * 0.07f, center = center)
+
+                        // Landed Dart Marker
+                        lastHitOffset?.let { (hx, hy) ->
+                            val hitPt = Offset(
+                                center.x + (hx - 0.5f) * r * 1.4f,
+                                center.y + (hy - 0.5f) * r * 1.4f
+                            )
+                            drawCircle(color = Color(0xFF38BDF8), radius = 14f, center = hitPt)
+                            drawCircle(color = Color.White, radius = 6f, center = hitPt)
                         }
                     }
                 }
-                if (r < 3) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        for (c in 0..3) {
-                            val vIdx = r * 4 + c
-                            val taken = vLines[vIdx]
-                            Box(
-                                modifier = Modifier
-                                    .width(14.dp)
-                                    .height(68.dp)
-                                    .background(if (taken) Color(0xFF06B6D4) else Color(0xFF334155))
-                                    .clickable(enabled = !taken && (!vsBot || currentPlayer == 1)) {
-                                        applyMove(false, vIdx, currentPlayer)
-                                    }
-                            )
-                            if (c < 3) {
-                                val owner = boxOwners[r * 3 + c]
-                                Box(
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .background(
-                                            when (owner) {
-                                                1 -> Color(0xFF38BDF8).copy(alpha = 0.35f)
-                                                2 -> Color(0xFFF59E0B).copy(alpha = 0.35f)
-                                                else -> Color.Transparent
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (owner != 0) {
-                                        Text(
-                                            text = if (owner == 1) "P1" else if (vsBot) "BOT" else "P2",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // Bottom Horizontal Aim Slider
+            Box(
+                modifier = Modifier
+                    .width(240.dp)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.55f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(6.dp)
+                        .fillMaxHeight()
+                        .offset(x = (aimX * 230f).dp)
+                        .background(Color.Black)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = statusText,
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                fontSize = 16.sp
+            )
         }
     }
 }
 
+// =========================================================
+// 2. WORDLE (CREAM BACKGROUND + GREEN/CHARCOAL TILES)
+// =========================================================
 @Composable
 fun WordleGameScreen(
     highScore: Int,
@@ -436,38 +311,40 @@ fun WordleGameScreen(
     BackHandler { onBack() }
     val wordList = remember {
         listOf(
-            "WORLD", "SPORT", "SCORE", "BRAIN", "SMART", "MATCH", "PLANT", "OCEAN",
-            "RIVER", "MOUNT", "TIGER", "EAGLE", "FLAME", "CROWN", "QUEST", "ATLAS"
+            "CROPS", "CROWD", "DRIVE", "WORLD", "SPORT", "SCORE", "BRAIN",
+            "SMART", "MATCH", "PLANT", "OCEAN", "TIGER", "FLAME", "ATLAS"
         )
     }
     var secretWord by remember { mutableStateOf(wordList.random()) }
     var guesses by remember { mutableStateOf(listOf<String>()) }
     var currentGuess by remember { mutableStateOf("") }
-    var gameStatus by remember { mutableStateOf("PLAYING") }
+    var streak by remember { mutableIntStateOf(0) }
 
-    fun startNewWord() {
+    fun nextWord() {
         secretWord = wordList.random()
         guesses = emptyList()
         currentGuess = ""
-        gameStatus = "PLAYING"
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(14.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFDF0D5))
+            .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Wordle 5-Letter", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { startNewWord() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFF22C55E)) }
-        }
+        ArcadeSoloHeader(
+            leftTitle = "CURRENT STREAK",
+            leftValue = "$streak",
+            rightTitle = "ALL TIME",
+            rightValue = "${maxOf(highScore, streak)}",
+            onBack = onBack,
+            onRestart = { nextWord() }
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // 6x5 Wordle Tile Grid matching Image 2
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (row in 0..5) {
                 val word = when {
@@ -480,29 +357,25 @@ fun WordleGameScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (col in 0..4) {
                         val ch = word[col]
-                        val bgColor = if (!isSubmitted) {
-                            Color(0xFF1E293B)
-                        } else if (secretWord[col] == ch) {
-                            Color(0xFF16A34A)
-                        } else if (secretWord.contains(ch)) {
-                            Color(0xFFD97706)
-                        } else {
-                            Color(0xFF334155)
+                        val bgColor = when {
+                            !isSubmitted -> Color.White
+                            secretWord[col] == ch -> Color(0xFF22B549)
+                            secretWord.contains(ch) -> Color(0xFFF59E0B)
+                            else -> Color(0xFF54585A)
                         }
 
                         Box(
                             modifier = Modifier
-                                .size(50.dp)
+                                .size(54.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(bgColor)
-                                .border(1.dp, Color(0xFF475569), RoundedCornerShape(8.dp)),
+                                .background(bgColor),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = if (ch == ' ') "" else "$ch",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isSubmitted) Color.White else Color(0xFF2B2B2B)
                             )
                         }
                     }
@@ -510,85 +383,117 @@ fun WordleGameScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.weight(1f))
 
-        if (gameStatus != "PLAYING") {
-            Text(
-                text = if (gameStatus == "WON") "Correct! The word was $secretWord" else "Word was: $secretWord",
-                color = Color(0xFF22C55E),
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = { startNewWord() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
+        // Colored QWERTY Keyboard matching Image 2
+        val allGuessedChars = guesses.joinToString("")
+        val rows = listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
+        rows.forEachIndexed { rIdx, rowKeys ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(vertical = 3.dp)
             ) {
-                Text("Next Word", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        } else {
-            val rows = listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
-            rows.forEach { rowKeys ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(vertical = 3.dp)
-                ) {
-                    rowKeys.forEach { k ->
-                        Box(
-                            modifier = Modifier
-                                .size(width = 31.dp, height = 42.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF1E293B))
-                                .clickable {
-                                    if (currentGuess.length < 5) currentGuess += k
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("$k", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
+                rowKeys.forEach { k ->
+                    val isGreen = guesses.any { g -> g.indices.any { i -> g[i] == k && secretWord[i] == k } }
+                    val isGray = allGuessedChars.contains(k) && !secretWord.contains(k)
+                    val keyBg = when {
+                        isGreen -> Color(0xFF22B549)
+                        isGray -> Color(0xFF54585A)
+                        else -> Color(0xFFEED7B5)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(width = 32.dp, height = 46.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(keyBg)
+                            .clickable {
+                                if (currentGuess.length < 5 && guesses.size < 6) currentGuess += k
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$k",
+                            color = if (isGreen || isGray) Color.White else Color.Black,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+                if (rIdx == 2) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 44.dp, height = 46.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFEED7B5))
+                            .clickable {
+                                if (currentGuess.isNotEmpty()) currentGuess = currentGuess.dropLast(1)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("⌫", color = Color(0xFF54585A), fontWeight = FontWeight.Black, fontSize = 18.sp)
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        if (currentGuess.isNotEmpty()) currentGuess = currentGuess.dropLast(1)
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Delete", color = Color.White)
-                }
-                Button(
-                    onClick = {
-                        if (currentGuess.length == 5) {
-                            val updated = guesses + currentGuess
-                            guesses = updated
-                            if (currentGuess == secretWord) {
-                                gameStatus = "WON"
-                                val pts = (7 - updated.size) * 200
-                                onSaveScore(pts)
-                            } else if (updated.size >= 6) {
-                                gameStatus = "LOST"
-                            }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Bottom Submit Pill + Pink Hint Circle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = {
+                    if (currentGuess.length == 5) {
+                        val next = guesses + currentGuess
+                        guesses = next
+                        if (currentGuess == secretWord) {
+                            streak++
+                            onSaveScore(streak)
+                            nextWord()
+                        } else if (next.size >= 6) {
+                            streak = 0
+                            nextWord()
+                        } else {
                             currentGuess = ""
                         }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA5B1B8)),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+            ) {
+                Text("SUBMIT", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE06397))
+                    .clickable {
+                        if (currentGuess.length < 5) {
+                            currentGuess += secretWord[currentGuess.length]
+                        }
                     },
-                    enabled = currentGuess.length == 5,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Submit Guess", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Lightbulb, contentDescription = "Hint", tint = Color.White)
             }
         }
     }
 }
 
+// =========================================================
+// 3. 2048 MERGE BLOCK DROP (IMAGE 5 STYLE)
+// =========================================================
 @Composable
 fun NumberSlideScreen(
     highScore: Int,
@@ -596,389 +501,263 @@ fun NumberSlideScreen(
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
-    var tiles by remember { mutableStateOf((1..15).toList() + listOf(0)) }
-    var moves by remember { mutableIntStateOf(0) }
-    var isSolved by remember { mutableStateOf(false) }
+    var columns by remember {
+        mutableStateOf(
+            listOf(
+                emptyList(),
+                emptyList(),
+                listOf(64, 32, 16),
+                emptyList(),
+                listOf(8)
+            )
+        )
+    }
+    var nextBlock by remember { mutableIntStateOf(16) }
+    var score by remember { mutableIntStateOf(96) }
 
-    fun scrambleBoard() {
-        val current = ((1..15).toList() + listOf(0)).toMutableList()
-        var zeroIdx = 15
-        repeat(80) {
-            val r = zeroIdx / 4
-            val c = zeroIdx % 4
-            val neighbors = mutableListOf<Int>()
-            if (r > 0) neighbors.add((r - 1) * 4 + c)
-            if (r < 3) neighbors.add((r + 1) * 4 + c)
-            if (c > 0) neighbors.add(r * 4 + (c - 1))
-            if (c < 3) neighbors.add(r * 4 + (c + 1))
-            val pick = neighbors.random()
-            current[zeroIdx] = current[pick]
-            current[pick] = 0
-            zeroIdx = pick
-        }
-        tiles = current
-        moves = 0
-        isSolved = false
+    fun tileColor(v: Int): Color = when (v) {
+        2, 4 -> Color(0xFFA855F7)
+        8 -> Color(0xFFFFC107)
+        16 -> Color(0xFF7ED957)
+        32 -> Color(0xFF5CE1E6)
+        64 -> Color(0xFFFF9F68)
+        128 -> Color(0xFFFF5757)
+        else -> Color(0xFF38BDF8)
     }
 
-    LaunchedEffect(Unit) { scrambleBoard() }
+    fun dropInColumn(colIdx: Int) {
+        val col = columns[colIdx].toMutableList()
+        if (col.size >= 7) return
+        col.add(nextBlock)
+        while (col.size >= 2 && col[col.lastIndex] == col[col.lastIndex - 1]) {
+            val merged = col.removeAt(col.lastIndex) * 2
+            col[col.lastIndex] = merged
+            score += merged
+            onSaveScore(score)
+        }
+        val updated = columns.toMutableList()
+        updated[colIdx] = col
+        columns = updated
+        nextBlock = listOf(4, 8, 16, 32, 64).random()
+    }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF3C434A))
+            .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        ArcadeSoloHeader(
+            leftTitle = "HARD MODE",
+            leftValue = "$score",
+            rightTitle = "ALL TIME",
+            rightValue = "${maxOf(highScore, score)}",
+            onBack = onBack,
+            onRestart = {
+                columns = List(5) { emptyList() }
+                score = 0
+            }
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Next Dropping Block Preview above Board
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tileColor(nextBlock)),
+            contentAlignment = Alignment.Center
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Number Slide 15", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { scrambleBoard() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFFA855F7)) }
+            Text("$nextBlock", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Moves: $moves   |   Best Score: $highScore", color = Color(0xFFA855F7), fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        Column(
-            modifier = Modifier.size(310.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // 5-Column Dark Merge Arena
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .height(380.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF2B3035))
+                .border(4.dp, Color(0xFF202428), RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            for (r in 0..3) {
-                Row(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            for (c in 0..4) {
+                val colStack = columns[c]
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(if (c % 2 == 0) Color(0xFF32373D) else Color(0xFF2B3035))
+                        .clickable { dropInColumn(c) },
+                    verticalArrangement = Arrangement.Bottom,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    for (c in 0..3) {
-                        val idx = r * 4 + c
-                        val num = tiles[idx]
+                    colStack.reversed().forEach { num ->
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    when {
-                                        num == 0 -> Color(0xFF0F172A)
-                                        num == idx + 1 -> Color(0xFF065F46)
-                                        else -> Color(0xFF1E293B)
-                                    }
-                                )
-                                .clickable(enabled = num != 0 && !isSolved) {
-                                    val zeroIdx = tiles.indexOf(0)
-                                    val zr = zeroIdx / 4
-                                    val zc = zeroIdx % 4
-                                    if (abs(r - zr) + abs(c - zc) == 1) {
-                                        val updated = tiles.toMutableList()
-                                        updated[zeroIdx] = num
-                                        updated[idx] = 0
-                                        tiles = updated
-                                        moves++
-                                        if (updated.take(15) == (1..15).toList()) {
-                                            isSolved = true
-                                            onSaveScore(maxOf(100, 1500 - moves * 10))
-                                        }
-                                    }
-                                },
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(tileColor(num)),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (num != 0) {
-                                Text("$num", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                            }
+                            Text(
+                                text = "$num",
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Black
+                            )
                         }
                     }
                 }
             }
         }
-
-        if (isSolved) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Puzzle Solved in $moves moves!", color = Color(0xFF22C55E), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        }
     }
 }
 
+// =========================================================
+// 4. TIC TAC TOE & DOTS AND BOXES & ARCHERY (ARCADE STYLED)
+// =========================================================
 @Composable
-fun DartsGameScreen(
+fun TicTacToeScreen(
     highScore: Int,
     onSaveScore: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
     var vsBot by remember { mutableStateOf(true) }
-    var p1Remaining by remember { mutableIntStateOf(301) }
-    var p2Remaining by remember { mutableIntStateOf(301) }
-    var isP1Turn by remember { mutableStateOf(true) }
-    var aimPos by remember { mutableFloatStateOf(0.5f) }
-    var lastShotText by remember { mutableStateOf("Tap THROW when the bar hits center!") }
+    var board by remember { mutableStateOf(List(9) { "" }) }
+    var isXTurn by remember { mutableStateOf(true) }
+    var p1Wins by remember { mutableIntStateOf(0) }
+    var p2Wins by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        var dir = 1f
-        while (true) {
-            delay(18L)
-            aimPos += 0.032f * dir
-            if (aimPos >= 1f) { aimPos = 1f; dir = -1f }
-            if (aimPos <= 0f) { aimPos = 0f; dir = 1f }
-        }
+    val lines = listOf(
+        listOf(0, 1, 2), listOf(3, 4, 5), listOf(6, 7, 8),
+        listOf(0, 3, 6), listOf(1, 4, 7), listOf(2, 5, 8),
+        listOf(0, 4, 8), listOf(2, 4, 6)
+    )
+    fun checkW(b: List<String>): String? {
+        for (l in lines) if (b[l[0]].isNotEmpty() && b[l[0]] == b[l[1]] && b[l[0]] == b[l[2]]) return b[l[0]]
+        return if (b.none { it.isEmpty() }) "DRAW" else null
     }
 
-    LaunchedEffect(isP1Turn, vsBot, p1Remaining, p2Remaining) {
-        if (vsBot && !isP1Turn && p1Remaining > 0 && p2Remaining > 0) {
-            delay(800L)
-            val botHit = listOf(20, 25, 40, 50, 60).random()
-            val nextScore = if (p2Remaining - botHit >= 0) p2Remaining - botHit else p2Remaining
-            p2Remaining = nextScore
-            lastShotText = "Bot threw $botHit pts!"
-            if (nextScore > 0) isP1Turn = true
+    LaunchedEffect(isXTurn, vsBot, board) {
+        if (vsBot && !isXTurn && checkW(board) == null) {
+            delay(400L)
+            val empty = board.indices.filter { board[it].isEmpty() }
+            if (empty.isNotEmpty()) {
+                val pick = empty.random()
+                val next = board.toMutableList().apply { this[pick] = "O" }
+                board = next
+                if (checkW(next) == "O") p2Wins++ else isXTurn = true
+            }
         }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().background(Color(0xFF48A9D6)),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Darts 301 Showdown", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { p1Remaining = 301; p2Remaining = 301; isP1Turn = true }) {
-                Icon(Icons.Default.Refresh, null, tint = Color(0xFFF97316))
-            }
-        }
-
-        ModeSelectorBar(vsBot = vsBot, accentColor = Color(0xFFF97316)) {
-            vsBot = it
-            p1Remaining = 301
-            p2Remaining = 301
-            isP1Turn = true
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)), modifier = Modifier.weight(1f).padding(4.dp)) {
-                Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("PLAYER 1", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                    Text("$p1Remaining", color = Color(0xFFF97316), fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)), modifier = Modifier.weight(1f).padding(4.dp)) {
-                Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(if (vsBot) "BOT" else "FRIEND (P2)", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                    Text("$p2Remaining", color = Color(0xFF38BDF8), fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(lastShotText, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(38.dp)
-                .clip(RoundedCornerShape(19.dp))
-                .background(Color(0xFF1E293B)),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.2f)
-                    .fillMaxHeight()
-                    .align(Alignment.Center)
-                    .background(Color(0xFF16A34A).copy(alpha = 0.45f))
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(aimPos.coerceIn(0.05f, 1f))
-                    .height(16.dp)
-                    .background(Color(0xFFF97316))
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        val isOver = p1Remaining == 0 || p2Remaining == 0
-        Button(
-            onClick = {
-                if (isOver) {
-                    p1Remaining = 301; p2Remaining = 301; isP1Turn = true
-                } else {
-                    val dist = abs(aimPos - 0.5f)
-                    val pts = when {
-                        dist < 0.05f -> 60
-                        dist < 0.12f -> 50
-                        dist < 0.22f -> 35
-                        else -> 15
-                    }
-                    if (isP1Turn) {
-                        p1Remaining = maxOf(0, p1Remaining - pts)
-                        lastShotText = "Player 1 hit $pts pts!"
-                        if (p1Remaining == 0) onSaveScore(500) else isP1Turn = false
-                    } else {
-                        p2Remaining = maxOf(0, p2Remaining - pts)
-                        lastShotText = "Friend hit $pts pts!"
-                        if (p2Remaining > 0) isP1Turn = true
+        ArcadeVsHeader(p1Wins, p2Wins, vsBot, onToggleMode = { vsBot = !vsBot }, onBack = onBack, onRestart = { board = List(9) { "" }; isXTurn = true })
+        Spacer(modifier = Modifier.height(30.dp))
+        Column(modifier = Modifier.size(300.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (r in 0..2) {
+                Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (c in 0..2) {
+                        val idx = r * 3 + c
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White)
+                                .clickable(enabled = board[idx].isEmpty() && checkW(board) == null) {
+                                    val sym = if (isXTurn) "X" else "O"
+                                    val next = board.toMutableList().apply { this[idx] = sym }
+                                    board = next
+                                    val w = checkW(next)
+                                    if (w == "X") { p1Wins++; onSaveScore(p1Wins * 100) }
+                                    else if (w == "O") p2Wins++
+                                    else isXTurn = !isXTurn
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(board[idx], fontSize = 46.sp, fontWeight = FontWeight.Black, color = if (board[idx] == "X") Color(0xFFFF5A52) else Color(0xFF00CFE8))
+                        }
                     }
                 }
-            },
-            enabled = isOver || isP1Turn || !vsBot,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
-            modifier = Modifier.fillMaxWidth().height(54.dp)
-        ) {
-            Text(
-                text = when {
-                    p1Remaining == 0 -> "Player 1 Wins! Play Again"
-                    p2Remaining == 0 -> "Player 2 / Bot Wins! Play Again"
-                    else -> "THROW DART NOW!"
-                },
-                color = Color.Black,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 17.sp
-            )
+            }
+        }
+        if (checkW(board) != null) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(onClick = { board = List(9) { "" }; isXTurn = true }) { Text("NEXT ROUND") }
         }
     }
 }
 
 @Composable
-fun ArcheryGameScreen(
-    highScore: Int,
-    onSaveScore: (Int) -> Unit,
-    onBack: () -> Unit
-) {
+fun DotsAndBoxesScreen(highScore: Int, onSaveScore: (Int) -> Unit, onBack: () -> Unit) {
     BackHandler { onBack() }
     var vsBot by remember { mutableStateOf(true) }
-    var round by remember { mutableIntStateOf(1) }
-    var p1Score by remember { mutableIntStateOf(0) }
-    var p2Score by remember { mutableIntStateOf(0) }
-    var isP1Turn by remember { mutableStateOf(true) }
-    var wind by remember { mutableIntStateOf(Random.nextInt(-3, 4)) }
-    var crosshair by remember { mutableFloatStateOf(0.5f) }
-    var statusText by remember { mutableStateOf("Time your release for the 10-Ring Bullseye!") }
+    var boxOwners by remember { mutableStateOf(IntArray(9)) }
+    var isP1 by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
-        var dir = 1f
-        while (true) {
-            delay(16L)
-            crosshair += 0.035f * dir
-            if (crosshair >= 1f) { crosshair = 1f; dir = -1f }
-            if (crosshair <= 0f) { crosshair = 0f; dir = 1f }
+    LaunchedEffect(isP1, vsBot, boxOwners) {
+        if (vsBot && !isP1 && boxOwners.any { it == 0 }) {
+            delay(450L)
+            val pick = boxOwners.indices.filter { boxOwners[it] == 0 }.random()
+            boxOwners = boxOwners.clone().apply { this[pick] = 2 }
+            isP1 = true
         }
     }
 
-    LaunchedEffect(isP1Turn, vsBot, round) {
-        if (vsBot && !isP1Turn && round <= 5) {
-            delay(750L)
-            val botRing = listOf(7, 8, 9, 10).random()
-            p2Score += botRing
-            statusText = "Bot shot a $botRing-point arrow!"
-            if (round == 5 && p1Score > p2Score) onSaveScore(p1Score * 20)
-            round++
-            wind = Random.nextInt(-3, 4)
-            isP1Turn = true
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Archery Pro (5 Arrows)", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { round = 1; p1Score = 0; p2Score = 0; isP1Turn = true }) {
-                Icon(Icons.Default.Refresh, null, tint = Color(0xFF84CC16))
-            }
-        }
-
-        ModeSelectorBar(vsBot = vsBot, accentColor = Color(0xFF84CC16)) {
-            vsBot = it; round = 1; p1Score = 0; p2Score = 0; isP1Turn = true
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = if (round <= 5) "Arrow $round of 5   |   Wind: $wind mph" else "Match Finished!",
-            color = Color(0xFF84CC16),
-            fontWeight = FontWeight.Bold
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF39C7D)), horizontalAlignment = Alignment.CenterHorizontally) {
+        ArcadeVsHeader(
+            youScore = boxOwners.count { it == 1 },
+            opponentScore = boxOwners.count { it == 2 },
+            vsBot = vsBot,
+            onToggleMode = { vsBot = !vsBot; boxOwners = IntArray(9) },
+            onBack = onBack,
+            onRestart = { boxOwners = IntArray(9); isP1 = true }
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Player 1: $p1Score pts   |   ${if (vsBot) "Bot" else "Friend"}: $p2Score pts",
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Box(
-            modifier = Modifier.size(180.dp).clip(CircleShape).background(Color.White),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(modifier = Modifier.size(140.dp).clip(CircleShape).background(Color.Black), contentAlignment = Alignment.Center) {
-                Box(modifier = Modifier.size(100.dp).clip(CircleShape).background(Color(0xFF38BDF8)), contentAlignment = Alignment.Center) {
-                    Box(modifier = Modifier.size(60.dp).clip(CircleShape).background(Color(0xFFEF4444)), contentAlignment = Alignment.Center) {
-                        Box(modifier = Modifier.size(26.dp).clip(CircleShape).background(Color(0xFFFACC15)))
+        Spacer(modifier = Modifier.height(30.dp))
+        Column(modifier = Modifier.size(300.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            for (r in 0..2) {
+                Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    for (c in 0..2) {
+                        val idx = r * 3 + c
+                        val owner = boxOwners[idx]
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(when (owner) { 1 -> Color(0xFFFF6B6B); 2 -> Color(0xFF38BDF8); else -> Color(0xFFFFF8E7) })
+                                .border(3.dp, Color(0xFF2B2B2B), RoundedCornerShape(14.dp))
+                                .clickable(enabled = owner == 0 && (isP1 || !vsBot)) {
+                                    val next = boxOwners.clone().apply { this[idx] = if (isP1) 1 else 2 }
+                                    boxOwners = next
+                                    onSaveScore(next.count { it == 1 } * 100)
+                                    isP1 = !isP1
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(when (owner) { 1 -> "YOU"; 2 -> if (vsBot) "BOT" else "P2"; else -> "+" }, fontWeight = FontWeight.Black, color = Color(0xFF2B2B2B))
+                        }
                     }
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(statusText, color = Color(0xFFCBD5E1), fontWeight = FontWeight.Medium)
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Box(
-            modifier = Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF1E293B)),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Box(modifier = Modifier.fillMaxWidth(crosshair.coerceIn(0.05f, 1f)).height(14.dp).background(Color(0xFF84CC16)))
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Button(
-            onClick = {
-                if (round > 5) {
-                    round = 1; p1Score = 0; p2Score = 0; isP1Turn = true
-                } else {
-                    val dist = abs(crosshair - 0.5f)
-                    val pts = when {
-                        dist < 0.06f -> 10
-                        dist < 0.14f -> 9
-                        dist < 0.24f -> 8
-                        else -> 6
-                    }
-                    if (isP1Turn) {
-                        p1Score += pts
-                        statusText = "Player 1 hit the $pts-Ring!"
-                        isP1Turn = false
-                    } else {
-                        p2Score += pts
-                        statusText = "Friend hit the $pts-Ring!"
-                        round++
-                        wind = Random.nextInt(-3, 4)
-                        isP1Turn = true
-                    }
-                }
-            },
-            enabled = round > 5 || isP1Turn || !vsBot,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF84CC16)),
-            modifier = Modifier.fillMaxWidth().height(54.dp)
-        ) {
-            Text(
-                text = if (round > 5) "Play Again" else "RELEASE ARROW",
-                color = Color.Black,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 17.sp
-            )
-        }
     }
+}
+
+@Composable
+fun ArcheryGameScreen(highScore: Int, onSaveScore: (Int) -> Unit, onBack: () -> Unit) {
+    DartsGameScreen(highScore = highScore, onSaveScore = onSaveScore, onBack = onBack)
 }
