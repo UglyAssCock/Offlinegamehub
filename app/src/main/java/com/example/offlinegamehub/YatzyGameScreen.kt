@@ -5,13 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlin.random.Random
 
 @Composable
@@ -29,247 +25,247 @@ fun YatzyGameScreen(
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
-
-    val categories = listOf(
-        "Ones", "Twos", "Threes", "Fours", "Fives", "Sixes",
-        "Three of a Kind", "Four of a Kind", "Full House",
-        "Small Straight", "Large Straight", "Yatzy (50)", "Chance"
-    )
-
-    var dice by remember { mutableStateOf(List(5) { 1 }) }
+    var vsBot by remember { mutableStateOf(true) }
+    var dice by remember { mutableStateOf(List(5) { 0 }) }
     var held by remember { mutableStateOf(List(5) { false }) }
-    var rollsLeft by remember { mutableIntStateOf(3) }
-    var scores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var rollsUsed by remember { mutableIntStateOf(0) }
+    var isPlayerTurn by remember { mutableStateOf(true) }
 
-    fun calculatePotentialScore(category: String, currentDice: List<Int>): Int {
-        val counts = currentDice.groupingBy { it }.eachCount()
-        val sum = currentDice.sum()
-        val uniqueSorted = currentDice.distinct().sorted()
+    val leftCats = listOf("⚀", "⚁", "⚂", "⚃", "⚄", "⚅")
+    val rightCats = listOf("3x", "4x", "🏠", "SMALL", "LARGE", "YATZY", "?")
+    var p1Scores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var botScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
-        return when (category) {
-            "Ones" -> currentDice.filter { it == 1 }.sum()
-            "Twos" -> currentDice.filter { it == 2 }.sum()
-            "Threes" -> currentDice.filter { it == 3 }.sum()
-            "Fours" -> currentDice.filter { it == 4 }.sum()
-            "Fives" -> currentDice.filter { it == 5 }.sum()
-            "Sixes" -> currentDice.filter { it == 6 }.sum()
-            "Three of a Kind" -> if (counts.values.any { it >= 3 }) sum else 0
-            "Four of a Kind" -> if (counts.values.any { it >= 4 }) sum else 0
-            "Full House" -> if (counts.values.contains(3) && counts.values.contains(2) || counts.values.contains(5)) 25 else 0
-            "Small Straight" -> {
-                val straights = listOf(listOf(1, 2, 3, 4), listOf(2, 3, 4, 5), listOf(3, 4, 5, 6))
-                if (straights.any { s -> uniqueSorted.containsAll(s) }) 30 else 0
-            }
-            "Large Straight" -> {
-                if (uniqueSorted == listOf(1, 2, 3, 4, 5) || uniqueSorted == listOf(2, 3, 4, 5, 6)) 40 else 0
-            }
-            "Yatzy (50)" -> if (counts.values.contains(5)) 50 else 0
-            "Chance" -> sum
+    fun calcScore(cat: String, d: List<Int>): Int {
+        if (d.all { it == 0 }) return 0
+        val counts = d.groupingBy { it }.eachCount()
+        val sum = d.sum()
+        return when (cat) {
+            "⚀" -> d.filter { it == 1 }.sum()
+            "⚁" -> d.filter { it == 2 }.sum()
+            "⚂" -> d.filter { it == 3 }.sum()
+            "⚃" -> d.filter { it == 4 }.sum()
+            "⚄" -> d.filter { it == 5 }.sum()
+            "⚅" -> d.filter { it == 6 }.sum()
+            "3x" -> if (counts.values.any { it >= 3 }) sum else 0
+            "4x" -> if (counts.values.any { it >= 4 }) sum else 0
+            "🏠" -> if ((counts.values.contains(3) && counts.values.contains(2)) || counts.values.contains(5)) 25 else 0
+            "SMALL" -> 30
+            "LARGE" -> 40
+            "YATZY" -> if (counts.values.contains(5)) 50 else 0
+            "?" -> sum
             else -> 0
         }
     }
 
-    val upperCategories = categories.take(6)
-    val upperSum = upperCategories.sumOf { scores[it] ?: 0 }
-    val upperBonus = if (upperSum >= 63) 35 else 0
-    val totalScore = scores.values.sum() + upperBonus
-    val isGameOver = scores.size == categories.size
-
-    fun resetGame() {
-        dice = List(5) { 1 }
-        held = List(5) { false }
-        rollsLeft = 3
-        scores = emptyMap()
+    LaunchedEffect(isPlayerTurn, vsBot) {
+        if (vsBot && !isPlayerTurn) {
+            delay(650L)
+            val allCats = leftCats + rightCats
+            val avail = allCats.filter { !botScores.containsKey(it) }
+            if (avail.isNotEmpty()) {
+                val pick = avail.random()
+                botScores = botScores + (pick to Random.nextInt(8, 28))
+            }
+            dice = List(5) { 0 }
+            held = List(5) { false }
+            rollsUsed = 0
+            isPlayerTurn = true
+        }
     }
+
+    val p1Total = p1Scores.values.sum()
+    val botTotal = botScores.values.sum()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
+            .background(Color(0xFFF39C7D))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        ArcadeVsHeader(
+            youScore = p1Total,
+            opponentScore = botTotal,
+            vsBot = vsBot,
+            onToggleMode = { vsBot = !vsBot; p1Scores = emptyMap(); botScores = emptyMap() },
+            onBack = onBack,
+            onRestart = { p1Scores = emptyMap(); botScores = emptyMap(); rollsUsed = 0; dice = List(5) { 0 } }
+        )
+
+        // Cream 2-Column Scorecard matching Image 8
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFFFFF4D2))
+                .border(4.dp, Color(0xFF3E3A3F), RoundedCornerShape(16.dp))
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-            }
-            Text(
-                text = "Yatzy Classic",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            IconButton(onClick = { resetGame() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Color(0xFFEC4899))
-            }
-        }
-
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceAround
+            // Left Column (1-6 + Bonus)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("SCORE", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    Text("$totalScore", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEC4899))
+                leftCats.forEach { cat ->
+                    YatzyScoreRow(
+                        label = cat,
+                        p1Val = p1Scores[cat],
+                        botVal = botScores[cat],
+                        preview = if (rollsUsed > 0) calcScore(cat, dice) else null,
+                        onSelect = {
+                            if (rollsUsed > 0 && !p1Scores.containsKey(cat)) {
+                                val next = p1Scores + (cat to calcScore(cat, dice))
+                                p1Scores = next
+                                onSaveScore(next.values.sum())
+                                isPlayerTurn = false
+                            }
+                        }
+                    )
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("UPPER BONUS", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    Text("$upperSum / 63 (+$upperBonus)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("BEST", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    Text("${maxOf(highScore, totalScore)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                Text("BONUS +35", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color(0xFF6B3A70))
+            }
+
+            // Right Column (3x, 4x, Full House, Straights, Yatzy, ?)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rightCats.forEach { cat ->
+                    YatzyScoreRow(
+                        label = cat,
+                        p1Val = p1Scores[cat],
+                        botVal = botScores[cat],
+                        preview = if (rollsUsed > 0) calcScore(cat, dice) else null,
+                        onSelect = {
+                            if (rollsUsed > 0 && !p1Scores.containsKey(cat)) {
+                                val next = p1Scores + (cat to calcScore(cat, dice))
+                                p1Scores = next
+                                onSaveScore(next.values.sum())
+                                isPlayerTurn = false
+                            }
+                        }
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
+        // 5 Dark Dice Slots with Star Icons / Numbers
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            dice.forEachIndexed { index, value ->
-                val isHeld = held[index]
+            dice.forEachIndexed { idx, v ->
+                val isHeld = held[idx]
                 Box(
                     modifier = Modifier
-                        .size(60.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (isHeld) Color(0xFFEC4899) else Color(0xFF1E293B))
-                        .border(
-                            width = 2.dp,
-                            color = if (isHeld) Color.White else Color(0xFF334155),
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        .clickable(enabled = rollsLeft < 3 && !isGameOver) {
-                            held = held.mapIndexed { i, h -> if (i == index) !h else h }
+                        .size(62.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isHeld) Color(0xFFFFBC2B) else Color(0xFF54585A))
+                        .border(3.dp, Color(0xFF3E3A3F), RoundedCornerShape(10.dp))
+                        .clickable(enabled = rollsUsed > 0) {
+                            held = held.mapIndexed { i, h -> if (i == idx) !h else h }
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (rollsLeft == 3) "-" else "$value",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                        if (isHeld) {
-                            Text(
-                                text = "HOLD",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
+                    Text(
+                        text = if (v == 0) "✦" else "$v",
+                        color = Color.White,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        Button(
-            onClick = {
-                if (isGameOver) {
-                    resetGame()
-                } else if (rollsLeft > 0) {
-                    dice = dice.mapIndexed { idx, oldVal ->
-                        if (held[idx]) oldVal else Random.nextInt(1, 7)
-                    }
-                    rollsLeft--
-                }
-            },
-            enabled = rollsLeft > 0 || isGameOver,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC4899)),
+        // Bottom Red ROLL [1] [2] [3] Button Bar matching Image 8
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Text(
-                text = when {
-                    isGameOver -> "Game Over! Final Score: $totalScore — Play Again"
-                    rollsLeft == 3 -> "Roll Dice (3 Rolls Left)"
-                    else -> "Roll Again ($rollsLeft Left) or Tap a Category Below"
+                .height(58.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFFD9534F))
+                .clickable(enabled = rollsUsed < 3 && isPlayerTurn) {
+                    dice = dice.mapIndexed { i, old -> if (held[i] && old != 0) old else Random.nextInt(1, 7) }
+                    rollsUsed++
                 },
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = "SCORECARD (Tap a row after rolling to lock score)",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF94A3B8)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-
-        categories.forEach { category ->
-            val lockedScore = scores[category]
-            val previewScore = if (rollsLeft < 3) calculatePotentialScore(category, dice) else 0
-            val canSelect = lockedScore == null && rollsLeft < 3
-
-            Card(
-                shape = RoundedCornerShape(10.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (lockedScore != null) Color(0xFF0F172A) else Color(0xFF1E293B)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 3.dp)
-                    .clickable(enabled = canSelect) {
-                        val newScores = scores + (category to previewScore)
-                        scores = newScores
-                        rollsLeft = 3
-                        held = List(5) { false }
-                        if (newScores.size == categories.size) {
-                            val finalUpper = upperCategories.sumOf { newScores[it] ?: 0 }
-                            val finalBonus = if (finalUpper >= 63) 35 else 0
-                            onSaveScore(newScores.values.sum() + finalBonus)
-                        }
-                    }
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = category,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (lockedScore != null) Color(0xFF64748B) else Color.White
-                    )
-                    Text(
-                        text = when {
-                            lockedScore != null -> "$lockedScore pts"
-                            rollsLeft < 3 -> "+$previewScore"
-                            else -> "-"
-                        },
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = when {
-                            lockedScore != null -> Color(0xFF10B981)
-                            rollsLeft < 3 && previewScore > 0 -> Color(0xFFF59E0B)
-                            else -> Color(0xFF64748B)
-                        }
-                    )
+                Text("ROLL", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                for (r in 1..3) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (rollsUsed < r) Color.White else Color(0xFF54585A))
+                            .border(2.dp, Color(0xFF3E3A3F), RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("$r", color = Color(0xFF3E3A3F), fontWeight = FontWeight.Black)
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun YatzyScoreRow(
+    label: String,
+    p1Val: Int?,
+    botVal: Int?,
+    preview: Int?,
+    onSelect: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White)
+                .border(2.dp, Color(0xFF6B3A70), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(label, fontSize = if (label.length > 3) 10.sp else 18.sp, fontWeight = FontWeight.Black, color = Color(0xFF3E3A3F))
+        }
+        // Red YOU Score Box
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF39C7D))
+                .border(2.dp, Color(0xFFD9534F), RoundedCornerShape(8.dp))
+                .clickable { onSelect() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = p1Val?.toString() ?: (preview?.toString() ?: ""),
+                fontWeight = FontWeight.Black,
+                color = if (p1Val != null) Color.Black else Color.White
+            )
+        }
+        // Blue BOT Score Box
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF81C3D7)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(botVal?.toString() ?: "", fontWeight = FontWeight.Black, color = Color.Black)
         }
     }
 }
