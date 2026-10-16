@@ -1,31 +1,230 @@
 package com.example.offlinegamehub
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
-data class DominoTile(val left: Int, val right: Int)
+// =========================================================
+// 1. LUDO (FULL 4-COLOR CROSS BOARD MATCHING IMAGE 3)
+// =========================================================
+@Composable
+fun LudoGameScreen(
+    highScore: Int,
+    onSaveScore: (Int) -> Unit,
+    onBack: () -> Unit
+) {
+    BackHandler { onBack() }
+    var vsBot by remember { mutableStateOf(true) }
+    var redStep by remember { mutableIntStateOf(0) }
+    var blueStep by remember { mutableIntStateOf(0) }
+    var isPlayerTurn by remember { mutableStateOf(true) }
+    var bannerText by remember { mutableStateOf("Tap Board to Roll Dice!") }
+
+    LaunchedEffect(isPlayerTurn, vsBot) {
+        if (vsBot && !isPlayerTurn) {
+            bannerText = "Bot thinking"
+            delay(850L)
+            val roll = Random.nextInt(1, 7)
+            blueStep = minOf(20, blueStep + roll)
+            bannerText = "Bot rolled $roll! Your Turn"
+            isPlayerTurn = true
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF4CA3CE)),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        ArcadeVsHeader(
+            youScore = redStep,
+            opponentScore = blueStep,
+            vsBot = vsBot,
+            modeLabel = "MEDIUM",
+            onToggleMode = { vsBot = !vsBot; redStep = 0; blueStep = 0 },
+            onBack = onBack,
+            onRestart = { redStep = 0; blueStep = 0; isPlayerTurn = true }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Rounded Status Banner ("Bot thinking" from Image 3)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.78f)
+                .height(64.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF417D9A)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = bannerText,
+                color = Color(0xFFB8D8E8),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // 15x15 Vector Ludo Cross Board
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .aspectRatio(1f)
+                .background(Color(0xFF262B2E))
+                .padding(4.dp)
+                .clickable(enabled = isPlayerTurn || !vsBot) {
+                    val roll = Random.nextInt(1, 7)
+                    if (isPlayerTurn) {
+                        redStep = minOf(20, redStep + roll)
+                        if (redStep == 20) onSaveScore(500)
+                        bannerText = "You rolled $roll!"
+                        isPlayerTurn = false
+                    } else {
+                        blueStep = minOf(20, blueStep + roll)
+                        bannerText = "P2 rolled $roll!"
+                        isPlayerTurn = true
+                    }
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cell = size.width / 15f
+
+                // White background grid for track cells
+                drawRect(color = Color.White, size = size)
+                for (i in 0..15) {
+                    drawLine(Color(0xFF262B2E), Offset(i * cell, 0f), Offset(i * cell, size.height), 2f)
+                    drawLine(Color(0xFF262B2E), Offset(0f, i * cell), Offset(size.width, i * cell), 2f)
+                }
+
+                // Colored Home Paths
+                drawRect(Color(0xFFFFBB2C), Offset(1 * cell, 7 * cell), Size(5 * cell, cell))
+                drawRect(Color(0xFF00B4EE), Offset(7 * cell, 1 * cell), Size(cell, 5 * cell))
+                drawRect(Color(0xFFFF5A52), Offset(7 * cell, 9 * cell), Size(cell, 5 * cell))
+                drawRect(Color(0xFF72C837), Offset(9 * cell, 7 * cell), Size(5 * cell, cell))
+
+                // 4 Corner Bases (6x6 cells each)
+                fun drawBase(startX: Float, startY: Float, mainCol: Color, innerCol: Color, drawTokens: Boolean, tokenCol: Color) {
+                    drawRect(mainCol, Offset(startX, startY), Size(6 * cell, 6 * cell))
+                    drawRoundRect(
+                        color = innerCol,
+                        topLeft = Offset(startX + 1.1f * cell, startY + 1.1f * cell),
+                        size = Size(3.8f * cell, 3.8f * cell),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(24f, 24f)
+                    )
+                    val offsets = listOf(
+                        Offset(startX + 2.1f * cell, startY + 2.1f * cell),
+                        Offset(startX + 3.9f * cell, startY + 2.1f * cell),
+                        Offset(startX + 2.1f * cell, startY + 3.9f * cell),
+                        Offset(startX + 3.9f * cell, startY + 3.9f * cell)
+                    )
+                    offsets.forEach { pt ->
+                        drawCircle(Color.White.copy(alpha = 0.55f), radius = cell * 0.55f, center = pt)
+                        if (drawTokens) {
+                            drawCircle(Color.Black, radius = cell * 0.46f, center = pt)
+                            drawCircle(tokenCol, radius = cell * 0.38f, center = pt)
+                        }
+                    }
+                }
+
+                drawBase(0f, 0f, Color(0xFFFFBB2C), Color(0xFFFFD470), false, Color(0xFFFFBB2C))
+                drawBase(9 * cell, 0f, Color(0xFF00B4EE), Color(0xFF8BE2FF), true, Color(0xFF00B4EE))
+                drawBase(0f, 9 * cell, Color(0xFFFF5A52), Color(0xFFFFB2AE), true, Color(0xFFFF5A52))
+                drawBase(9 * cell, 9 * cell, Color(0xFF72C837), Color(0xFFA9E382), false, Color(0xFF72C837))
+
+                // Center 3x3 Home Triangles
+                val cx = 7.5f * cell
+                val cy = 7.5f * cell
+                val tl = Offset(6 * cell, 6 * cell)
+                val tr = Offset(9 * cell, 6 * cell)
+                val bl = Offset(6 * cell, 9 * cell)
+                val br = Offset(9 * cell, 9 * cell)
+
+                drawPath(Path().apply { moveTo(tl.x, tl.y); lineTo(tr.x, tr.y); lineTo(cx, cy); close() }, Color(0xFF00B4EE))
+                drawPath(Path().apply { moveTo(bl.x, bl.y); lineTo(br.x, br.y); lineTo(cx, cy); close() }, Color(0xFFFF5A52))
+                drawPath(Path().apply { moveTo(tl.x, tl.y); lineTo(bl.x, bl.y); lineTo(cx, cy); close() }, Color(0xFFFFBB2C))
+                drawPath(Path().apply { moveTo(tr.x, tr.y); lineTo(br.x, br.y); lineTo(cx, cy); close() }, Color(0xFF72C837))
+            }
+        }
+    }
+}
+
+// =========================================================
+// 2. DOMINOES (CORAL TABLE + CREAM PIP TILES MATCHING IMAGE 7)
+// =========================================================
+data class DominoTile(val top: Int, val bottom: Int)
+
+@Composable
+fun DominoPipTileView(
+    tile: DominoTile,
+    isFaceUp: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Box(
+        modifier = modifier
+            .size(width = 45.dp, height = 92.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFFFF4D2))
+            .border(2.5.dp, Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
+            .let { if (onClick != null) it.clickable { onClick() } else it }
+    ) {
+        if (isFaceUp) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                drawLine(Color(0xFF1E1E1E), Offset(w * 0.12f, h / 2f), Offset(w * 0.88f, h / 2f), 3f)
+
+                fun drawPips(count: Int, yOffset: Float) {
+                    val cx = w / 2f
+                    val cy = yOffset + h / 4f
+                    val dx = w * 0.25f
+                    val dy = h * 0.12f
+                    val r = 5.5f
+                    val col = Color(0xFF1E1E1E)
+
+                    if (count % 2 == 1) drawCircle(col, r, Offset(cx, cy))
+                    if (count >= 2) {
+                        drawCircle(col, r, Offset(cx - dx, cy - dy))
+                        drawCircle(col, r, Offset(cx + dx, cy + dy))
+                    }
+                    if (count >= 4) {
+                        drawCircle(col, r, Offset(cx + dx, cy - dy))
+                        drawCircle(col, r, Offset(cx - dx, cy + dy))
+                    }
+                    if (count == 6) {
+                        drawCircle(col, r, Offset(cx - dx, cy))
+                        drawCircle(col, r, Offset(cx + dx, cy))
+                    }
+                }
+
+                drawPips(tile.top, 0f)
+                drawPips(tile.bottom, h / 2f)
+            }
+        }
+    }
+}
 
 @Composable
 fun DominoesGameScreen(
@@ -34,348 +233,122 @@ fun DominoesGameScreen(
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
-
     var vsBot by remember { mutableStateOf(true) }
-    var p1Hand by remember { mutableStateOf(listOf<DominoTile>()) }
-    var p2Hand by remember { mutableStateOf(listOf<DominoTile>()) }
-    var boneyard by remember { mutableStateOf(listOf<DominoTile>()) }
-    var leftEnd by remember { mutableIntStateOf(6) }
-    var rightEnd by remember { mutableIntStateOf(6) }
-    var boardCount by remember { mutableIntStateOf(1) }
-    var isP1Turn by remember { mutableStateOf(true) }
-    var statusText by remember { mutableStateOf("Match either end of the Domino chain!") }
-    var winner by remember { mutableStateOf<String?>(null) }
+    var playerHand by remember { mutableStateOf(listOf<DominoTile>()) }
+    var botCount by remember { mutableIntStateOf(7) }
+    var playedChain by remember { mutableStateOf(listOf<DominoTile>()) }
+    var leftEnd by remember { mutableIntStateOf(-1) }
+    var rightEnd by remember { mutableIntStateOf(-1) }
+    var p1Score by remember { mutableIntStateOf(0) }
+    var botScore by remember { mutableIntStateOf(0) }
 
-    fun startDominoes() {
+    fun dealDominoes() {
         val deck = mutableListOf<DominoTile>()
-        for (i in 0..6) {
-            for (j in i..6) {
-                if (!(i == 6 && j == 6)) deck.add(DominoTile(i, j))
-            }
-        }
+        for (a in 0..6) for (b in a..6) deck.add(DominoTile(a, b))
         deck.shuffle()
-        p1Hand = deck.take(7)
-        p2Hand = deck.drop(7).take(7)
-        boneyard = deck.drop(14)
-        leftEnd = 6
-        rightEnd = 6
-        boardCount = 1
-        isP1Turn = true
-        winner = null
-        statusText = "Starter tile is [6 | 6]. Tap a matching tile!"
+        playerHand = deck.take(7)
+        botCount = 7
+        playedChain = emptyList()
+        leftEnd = -1
+        rightEnd = -1
     }
 
-    LaunchedEffect(Unit) { startDominoes() }
-
-    fun canPlayTile(t: DominoTile): Boolean {
-        return t.left == leftEnd || t.right == leftEnd || t.left == rightEnd || t.right == rightEnd
-    }
-
-    fun playTileOnBoard(t: DominoTile) {
-        when {
-            t.left == leftEnd -> leftEnd = t.right
-            t.right == leftEnd -> leftEnd = t.left
-            t.left == rightEnd -> rightEnd = t.right
-            t.right == rightEnd -> rightEnd = t.left
-        }
-        boardCount++
-    }
-
-    LaunchedEffect(isP1Turn, vsBot, winner) {
-        if (vsBot && !isP1Turn && winner == null) {
-            delay(750L)
-            val idx = p2Hand.indexOfFirst { canPlayTile(it) }
-            if (idx != -1) {
-                val tile = p2Hand[idx]
-                p2Hand = p2Hand.toMutableList().apply { removeAt(idx) }
-                playTileOnBoard(tile)
-                if (p2Hand.isEmpty()) {
-                    winner = "Bot Won Dominoes!"
-                } else {
-                    statusText = "Bot played [${tile.left}|${tile.right}]. Your turn!"
-                    isP1Turn = true
-                }
-            } else if (boneyard.isNotEmpty()) {
-                p2Hand = p2Hand + boneyard.first()
-                boneyard = boneyard.drop(1)
-                statusText = "Bot drew from boneyard and passed."
-                isP1Turn = true
-            } else {
-                statusText = "Bot passed! Your turn."
-                isP1Turn = true
-            }
-        }
-    }
+    LaunchedEffect(Unit) { dealDominoes() }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF39C74)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Top Blue Header Band + Opponent Face-Down Tiles
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF00C2FF))
+                .padding(bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Classic Dominoes", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { startDominoes() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFF38BDF8)) }
-        }
+            ArcadeVsHeader(
+                youScore = p1Score,
+                opponentScore = botScore,
+                vsBot = vsBot,
+                modeLabel = "GOAL 150",
+                onToggleMode = { vsBot = !vsBot; dealDominoes() },
+                onBack = onBack,
+                onRestart = { dealDominoes() }
+            )
 
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { vsBot = true; startDominoes() }, colors = ButtonDefaults.buttonColors(containerColor = if (vsBot) Color(0xFF38BDF8) else Color(0xFF1E293B)), modifier = Modifier.weight(1f)) {
-                Text("Vs Smart Bot", color = if (vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-            }
-            Button(onClick = { vsBot = false; startDominoes() }, colors = ButtonDefaults.buttonColors(containerColor = if (!vsBot) Color(0xFF38BDF8) else Color(0xFF1E293B)), modifier = Modifier.weight(1f)) {
-                Text("Vs Friend (2P)", color = if (!vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Text("P1 Tiles: ${p1Hand.size}", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
-                Text("${if (vsBot) "Bot" else "P2"} Tiles: ${p2Hand.size}", color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
-                Text("Boneyard: ${boneyard.size}", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                repeat(botCount) {
+                    DominoPipTileView(tile = DominoTile(0, 0), isFaceUp = false)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("OPEN CHAIN ENDS ($boardCount tiles played)", fontSize = 12.sp, color = Color(0xFF94A3B8))
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1E293B)).border(2.dp, Color(0xFF38BDF8), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("$leftEnd", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            }
-            Text("⟷", fontSize = 26.sp, color = Color(0xFF38BDF8))
-            Box(
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1E293B)).border(2.dp, Color(0xFF38BDF8), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("$rightEnd", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-        Text(winner ?: statusText, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(modifier = Modifier.height(14.dp))
-
-        val activeHand = if (isP1Turn) p1Hand else p2Hand
-
-        if (winner == null) {
-            Button(
-                onClick = {
-                    if (boneyard.isNotEmpty()) {
-                        val drawn = boneyard.first()
-                        boneyard = boneyard.drop(1)
-                        if (isP1Turn) p1Hand = p1Hand + drawn else p2Hand = p2Hand + drawn
-                    } else {
-                        isP1Turn = !isP1Turn
+        // Center Table Chain
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            if (playedChain.isEmpty()) {
+                Text("Tap any domino below to start the chain!", color = Color(0xFF5A2E1B), fontWeight = FontWeight.Black)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    playedChain.takeLast(6).forEach { t ->
+                        DominoPipTileView(tile = t, isFaceUp = true)
                     }
-                },
-                enabled = isP1Turn || !vsBot,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (boneyard.isNotEmpty()) "Draw Tile from Boneyard (${boneyard.size})" else "Pass Turn", color = Color.White)
+                }
             }
+        }
 
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(if (isP1Turn) "PLAYER 1 HAND" else "FRIEND (P2) HAND", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                activeHand.forEachIndexed { idx, tile ->
-                    val playable = (isP1Turn || !vsBot) && canPlayTile(tile)
-                    Box(
-                        modifier = Modifier
-                            .size(width = 70.dp, height = 110.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (playable) Color.White else Color(0xFF334155))
-                            .border(2.dp, if (playable) Color(0xFF38BDF8) else Color.Gray, RoundedCornerShape(12.dp))
-                            .clickable(enabled = playable) {
-                                playTileOnBoard(tile)
-                                if (isP1Turn) {
-                                    val next = p1Hand.toMutableList().apply { removeAt(idx) }
-                                    p1Hand = next
-                                    if (next.isEmpty()) {
-                                        winner = "Player 1 Wins Dominoes!"
-                                        onSaveScore(400 + p2Hand.size * 40)
-                                    } else {
-                                        isP1Turn = false
-                                    }
-                                } else {
-                                    val next = p2Hand.toMutableList().apply { removeAt(idx) }
-                                    p2Hand = next
-                                    if (next.isEmpty()) {
-                                        winner = "Friend (P2) Wins Dominoes!"
-                                    } else {
-                                        isP1Turn = true
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("${tile.left}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                            HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Color.Black)
-                            Text("${tile.right}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
+        // Bottom Red Player Dock with Pip Dominoes
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFFF5A52))
+                .padding(vertical = 14.dp, horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            playerHand.forEachIndexed { idx, tile ->
+                DominoPipTileView(
+                    tile = tile,
+                    isFaceUp = true,
+                    onClick = {
+                        val valid = playedChain.isEmpty() ||
+                            tile.top == leftEnd || tile.bottom == leftEnd ||
+                            tile.top == rightEnd || tile.bottom == rightEnd
+                        if (valid) {
+                            if (playedChain.isEmpty()) {
+                                leftEnd = tile.top
+                                rightEnd = tile.bottom
+                            } else if (tile.top == rightEnd) {
+                                rightEnd = tile.bottom
+                            } else if (tile.bottom == rightEnd) {
+                                rightEnd = tile.top
+                            } else if (tile.top == leftEnd) {
+                                leftEnd = tile.bottom
+                            } else {
+                                leftEnd = tile.top
+                            }
+                            playedChain = playedChain + tile
+                            val next = playerHand.toMutableList().apply { removeAt(idx) }
+                            playerHand = next
+                            p1Score += (tile.top + tile.bottom)
+                            onSaveScore(p1Score)
+                            if (botCount > 1) {
+                                botCount--
+                                botScore += Random.nextInt(4, 11)
+                            }
+                            if (next.isEmpty()) dealDominoes()
                         }
                     }
-                }
+                )
             }
-        }
-    }
-}
-
-@Composable
-fun LudoGameScreen(
-    highScore: Int,
-    onSaveScore: (Int) -> Unit,
-    onBack: () -> Unit
-) {
-    BackHandler { onBack() }
-    val finishLine = 25
-    var vsBot by remember { mutableStateOf(true) }
-    var p1Pos by remember { mutableIntStateOf(0) }
-    var p2Pos by remember { mutableIntStateOf(0) }
-    var diceVal by remember { mutableIntStateOf(1) }
-    var hasRolled by remember { mutableStateOf(false) }
-    var isP1Turn by remember { mutableStateOf(true) }
-    var statusText by remember { mutableStateOf("Roll and race to Space 25!") }
-    var winner by remember { mutableStateOf<String?>(null) }
-
-    fun resetLudo() {
-        p1Pos = 0
-        p2Pos = 0
-        diceVal = 1
-        hasRolled = false
-        isP1Turn = true
-        winner = null
-        statusText = "Player 1: Tap ROLL DICE!"
-    }
-
-    LaunchedEffect(isP1Turn, vsBot, winner) {
-        if (vsBot && !isP1Turn && winner == null) {
-            delay(750L)
-            val roll = Random.nextInt(1, 7)
-            diceVal = roll
-            val next = minOf(finishLine, p2Pos + roll)
-            p2Pos = next
-            statusText = "Bot rolled $roll and moved to $next/$finishLine!"
-            if (next == finishLine) {
-                winner = "Bot Won Ludo Race!"
-            } else {
-                isP1Turn = true
-            }
-            hasRolled = false
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }
-            Text("Ludo Quick Race", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = { resetLudo() }) { Icon(Icons.Default.Refresh, null, tint = Color(0xFFFACC15)) }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { vsBot = true; resetLudo() }, colors = ButtonDefaults.buttonColors(containerColor = if (vsBot) Color(0xFFFACC15) else Color(0xFF1E293B)), modifier = Modifier.weight(1f)) {
-                Text("Vs Smart Bot", color = if (vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-            }
-            Button(onClick = { vsBot = false; resetLudo() }, colors = ButtonDefaults.buttonColors(containerColor = if (!vsBot) Color(0xFFFACC15) else Color(0xFF1E293B)), modifier = Modifier.weight(1f)) {
-                Text("Vs Friend (2P)", color = if (!vsBot) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(winner ?: statusText, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .size(84.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Color(0xFFFACC15))
-                .clickable(enabled = !hasRolled && winner == null && (isP1Turn || !vsBot)) {
-                    diceVal = Random.nextInt(1, 7)
-                    hasRolled = true
-                    statusText = "Rolled $diceVal! Tap your token below to move."
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("🎲 $diceVal", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                Text(if (hasRolled) "MOVE" else "ROLL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Button(
-            onClick = {
-                if (hasRolled && isP1Turn) {
-                    val next = minOf(finishLine, p1Pos + diceVal)
-                    p1Pos = next
-                    hasRolled = false
-                    if (next == finishLine) {
-                        winner = "Player 1 Wins Ludo!"
-                        onSaveScore(600)
-                    } else if (diceVal != 6) {
-                        isP1Turn = false
-                    } else {
-                        statusText = "Rolled 6! Bonus turn for Player 1."
-                    }
-                }
-            },
-            enabled = hasRolled && isP1Turn && p1Pos < finishLine,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-        ) {
-            Text("Player 1 Token: Space $p1Pos / $finishLine", color = Color.White, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = {
-                if (!vsBot && hasRolled && !isP1Turn) {
-                    val next = minOf(finishLine, p2Pos + diceVal)
-                    p2Pos = next
-                    hasRolled = false
-                    if (next == finishLine) {
-                        winner = "Friend (P2) Wins Ludo!"
-                    } else if (diceVal != 6) {
-                        isP1Turn = true
-                    } else {
-                        statusText = "Rolled 6! Bonus turn for Player 2."
-                    }
-                }
-            },
-            enabled = !vsBot && hasRolled && !isP1Turn && p2Pos < finishLine,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-        ) {
-            Text(if (vsBot) "Bot Token: Space $p2Pos / $finishLine" else "Friend (P2) Token: Space $p2Pos / $finishLine", color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }
